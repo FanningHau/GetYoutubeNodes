@@ -1,60 +1,58 @@
-name: 每日下载任务
+name: 每日提取并更新内容
 
 on:
-  # 1. 自动化定时触发
   schedule:
-    # 每天 8:00 (UTC 时间) 运行
-    # (注意: 这是 UTC 时间，北京时间是 16:00)
     - cron: '0 8 * * *'
   
-  # 2. 允许手动触发 (方便测试)
   workflow_dispatch:
 
 jobs:
-  download-files:
-    # 使用最新的 Ubuntu 系统
+  download-and-commit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
-      # 步骤 1: 检出 (checkout) 你的代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 步骤 2: 设置 Python 3.10 环境
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      # 步骤 3: (!!关键!!) 安装 FFmpeg
-      # 你的脚本依赖 yt_dlp 提取 mp3，yt_dlp 依赖 FFmpeg
       - name: Install FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      # 步骤 4: 安装 Python 依赖库
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          # 从你的脚本注释中获取依赖
           pip install google-api-python-client gdown yt-dlp
       
-      # 步骤 5: 运行你的 Python 脚本
+      # (!!) --- 关键改动在这里 ---
       - name: Run Python script
-        run: python getnodes_modified.py # 确保这里的文件名是你修改后的
+        run: python getnodes_modified.py # 运行我们修改后的脚本
         env:
-          # (!!关键!!) 注入你设置的 Secret
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          VIDEO_ID: ${{ secrets.VIDEO_ID }}        # <-- 新增
+          ZIP_PASSWORD: ${{ secrets.ZIP_PASSWORD }}    # <-- 新增
 
-      # 步骤 6: (!!关键!!) 上传所有下载的文件作为 "Artifact"
-      # 这会把 'daily_downloads' 文件夹里的所有内容打包
-      - name: Upload downloaded files
-        uses: actions/upload-artifact@v4
-        with:
-          # Artifact (产物) 的名字，可以自定义
-          name: Daily-Downloads-${{ github.run_number }}
-          # 上传那个 Python 脚本创建的文件夹
-          path: ./daily_downloads/
-          # (可选) 设置文件的保留天数，默认 90 天
-          retention-days: 14
+      # (!!) --- 提交步骤 (保持不变) ---
+      - name: Commit and push extracted content
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add ${{ env.FINAL_CONTENT_FILE_NAME }}
+          
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "✅ 文本内容没有变化，无需提交。"
+          else
+            echo "🚀 发现文本内容更新，正在提交..."
+            git commit -m "Automated update: 提取并更新订阅内容 (${{ env.TODAY_DATE }})"
+            git push
+          fi
+        env:
+          FINAL_CONTENT_FILE_NAME: "subscription_content.txt" 
+          TODAY_DATE: $(date +'%Y-%m-%d')
