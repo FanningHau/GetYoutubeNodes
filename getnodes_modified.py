@@ -1,130 +1,139 @@
-# getnodes_modified.py
-
 import sys
 import re
 import os
-import gdown     # 用于下载 Google Drive
-import yt_dlp    # 用于下载 YouTube
+import gdown     
+import yt_dlp    
 from googleapiclient.discovery import build
 from datetime import datetime
+import zipfile 
+import io      
 
 # --- 变量配置 ---
-
-# 1. API 密钥将从 GitHub Secrets (环境变量) 读取
+# (!!) 所有动态配置都从环境变量中读取
 API_KEY = os.environ.get("YOUTUBE_API_KEY")
+VIDEO_ID = os.environ.get("VIDEO_ID")
+ZIP_PASSWORD = os.environ.get("ZIP_PASSWORD")
 
-# 2. 固定的 Video ID
-VIDEO_ID = "FNs1N31XZtE" 
-
-# 3. 创建一个输出目录
-OUTPUT_DIR = "daily_downloads"
+# 1. 临时下载目录
+OUTPUT_DIR = "temp_downloads"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# 4. 获取今天日期 (YYYY-MM-DD 格式)
-TODAY_DATE = datetime.now().strftime('%Y-%m-%d')
+# 2. 最终在【仓库根目录】生成的文件名
+FINAL_CONTENT_FILE = "subscription_content.txt"
 
-# 5. 动态生成文件名
-#    (!!) 文件名现在包含日期并保存在 OUTPUT_DIR 中
+# 3. 临时文件名
+TODAY_DATE = datetime.now().strftime('%Y-%m-%d')
 OUTPUT_LINK_FILE  = os.path.join(OUTPUT_DIR, f"{TODAY_DATE}-subscription_info.txt")
 DOWNLOAD_FILENAME = os.path.join(OUTPUT_DIR, f"{TODAY_DATE}-13148866.zip")
 AUDIO_FILENAME    = os.path.join(OUTPUT_DIR, f"{TODAY_DATE}-video_audio.mp3")
-
 # -------------------------
 
 def main():
-    
-    # 检查 API 密钥是否存在
+    # (!!) 检查所有 Secrets 是否都已设置
     if not API_KEY:
         print("❌ 严重错误：未能在环境变量中找到 YOUTUBE_API_KEY。")
-        print("请在 GitHub 仓库的 Settings > Secrets 中进行设置。")
-        sys.exit(1) # 退出脚本，防止后续出错
+        sys.exit(1)
+    if not VIDEO_ID:
+        print("❌ 严重错误：未能在环境变量中找到 VIDEO_ID。")
+        print("请在 GitHub 仓库的 Settings > Secrets 中设置它。")
+        sys.exit(1)
+    if not ZIP_PASSWORD:
+        print("❌ 严重错误：未能在环境变量中找到 ZIP_PASSWORD。")
+        print("请在 GitHub 仓库的 Settings > Secrets 中设置它。")
+        sys.exit(1)
 
+    print(f"--- 正在处理 Video ID: {VIDEO_ID} ---")
     video_url = f"https://www.youtube.com/watch?v={VIDEO_ID}"
     
     try:
-        # --- 步骤 1: 获取介绍栏，提取 GDrive 链接 ---
-        print("--- 步骤 1: 获取 YouTube 视频介绍 ---")
+        # --- 步骤 1 & 2: 获取并保存链接 (与之前相同) ---
+        print("--- 步骤 1 & 2: 获取并保存链接 ---")
         youtube = build('youtube', 'v3', developerKey=API_KEY)
         video_response = youtube.videos().list(part='snippet', id=VIDEO_ID).execute()
         if not video_response.get('items'):
             print("错误：无法获取 Video ID 信息。")
             return
         description = video_response['items'][0]['snippet']['description']
-        print("成功获取介绍栏。")
-
         pattern = r'(https?://drive\.google\.com[^\s]+)'
         matches = re.findall(pattern, description)
+        found_gdrive_link = ""
         
-        found_gdrive_link = "" # 谷歌网盘链接
-        
-        if not matches:
-            print(f"⚠️ 未能在介绍栏中找到 Google Drive 链接。")
-        else:
+        if matches:
             found_gdrive_link = matches[0]
-            print(f"🎉 成功提取到 Google Drive 链接：\n{found_gdrive_link}")
-
-        # --- 步骤 2: 保存所有链接到文件 ---
-        print(f"\n--- 步骤 2: 保存所有链接到 {OUTPUT_LINK_FILE} ---")
-        try:
-            with open(OUTPUT_LINK_FILE, 'w', encoding='utf-8') as f:
-                f.write("[Google Drive Link]\n")
-                if found_gdrive_link:
-                    f.write(found_gdrive_link + "\n")
-                else:
-                    f.write("(未在介绍栏找到)\n")
-                
-                f.write("\n[YouTube Video Link (for manual audio download)]\n")
-                f.write(video_url + "\n")
-            print(f"✅ 成功保存所有链接。")
-        except Exception as e:
-            print(f"⚠️ 无法写入链接文件: {e}")
+            print(f"🎉 成功提取到 Google Drive 链接")
+        else:
+            print(f"⚠️ 未能在介绍栏中找到 Google Drive 链接。")
+        
+        with open(OUTPUT_LINK_FILE, 'w', encoding='utf-8') as f:
+            f.write(f"[GDrive] {found_gdrive_link}\n[YouTube] {video_url}\n")
+        print(f"✅ 成功保存链接到 {OUTPUT_LINK_FILE}")
 
         # --- 步骤 3: 下载 Google Drive 的 ZIP 文件 ---
+        zip_content_extracted = False
         if found_gdrive_link:
             print(f"\n--- 步骤 3: 下载 Google Drive 文件 ---")
-            if os.path.exists(DOWNLOAD_FILENAME):
-                os.remove(DOWNLOAD_FILENAME)
-                print(f"已删除旧的 {DOWNLOAD_FILENAME}")
-            
             try:
                 gdown.download(found_gdrive_link, DOWNLOAD_FILENAME, quiet=False, fuzzy=True)
                 print(f"✅ 成功下载文件: {DOWNLOAD_FILENAME}")
+
+                # (!!) --- 步骤 4: 使用密码解压并提取文本 ---
+                print(f"\n--- 步骤 4: 提取 {DOWNLOAD_FILENAME} 内的文本 ---")
+                
+                # (!!) 将密码字符串转换为 bytes
+                pwd_bytes = ZIP_PASSWORD.encode('utf-8')
+
+                with zipfile.ZipFile(DOWNLOAD_FILENAME, 'r') as zip_ref:
+                    target_file_name = None
+                    for name in zip_ref.namelist():
+                        if name.endswith('.txt'):
+                            target_file_name = name
+                            print(f"在 ZIP 中找到目标文件: {target_file_name}")
+                            break
+                    
+                    if target_file_name:
+                        # (!!) 使用 pwd 参数打开加密文件
+                        with zip_ref.open(target_file_name, pwd=pwd_bytes) as f:
+                            content = io.TextIOWrapper(f, encoding='utf-8').read()
+                        
+                        with open(FINAL_CONTENT_FILE, 'w', encoding='utf-8') as final_file:
+                            final_file.write(content)
+                        
+                        print(f"✅ 成功提取加密内容并保存到 {FINAL_CONTENT_FILE}")
+                        zip_content_extracted = True
+                    else:
+                        print(f"⚠️ 未能在 {DOWNLOAD_FILENAME} 中找到任何 .txt 文件。")
+
+            except zipfile.BadZipFile:
+                 print(f"❌ 下载的文件不是一个有效的 ZIP 文件。")
+            except RuntimeError as e:
+                # (!!) 捕获密码错误的异常
+                if 'password' in str(e).lower():
+                    print(f"❌ 解压失败：密码错误！")
+                    print("请检查 GitHub Secrets 中的 ZIP_PASSWORD 是否为最新。")
+                else:
+                    print(f"❌ 解压时发生运行时错误: {e}")
             except Exception as e:
-                print(f"❌ 下载 Google Drive 文件失败: {e}")
+                print(f"❌ 下载或解压 Google Drive 文件失败: {e}")
         else:
-            print(f"\n--- 步骤 3: 跳过下载 (未找到 Google Drive 链接) ---")
+            print(f"\n--- 步骤 3/4: 跳过下载和提取 (未找到链接) ---")
 
-
-        # --- 步骤 4: 下载 YouTube 视频音频 ---
-        print(f"\n--- 步骤 4: 下载 YouTube 视频音频 ---")
-        if os.path.exists(AUDIO_FILENAME):
-            os.remove(AUDIO_FILENAME)
-            print(f"已删除旧的 {AUDIO_FILENAME}")
-        
-        # (!!) 注意：outtmpl 现在是一个完整的路径
-        ydl_opts = {
-            'format': 'bestaudio/best', 
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'outtmpl': AUDIO_FILENAME,
-            'quiet': False,
-        }
-        
+        # --- 步骤 5: 下载音频 (仍然是临时的) ---
+        print(f"\n--- 步骤 5: 下载 YouTube 视频音频 (临时) ---")
         try:
+            ydl_opts = {'format': 'bestaudio/best', 'outtmpl': AUDIO_FILENAME}
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([video_url])
-            print(f"✅ 成功下载音频: {AUDIO_FILENAME}")
-            print("\n--- 任务完成 ---")
+            print(f"✅ 成功下载临时音频")
         except Exception as e:
-            print(f"❌ 下载音频失败 (错误: {e})")
-            print(f"--- 任务部分完成 ---")
+            print(f"⚠️ 下载音频失败: {e}")
+        
+        if zip_content_extracted:
+            print(f"\n--- 任务完成 ---")
+        else:
+             print(f"\n--- 任务部分完成 ---")
 
     except Exception as e:
         print(f"\n发生严重错误：{e}")
-        print("请检查 API_KEY, VIDEO_ID, FFmpeg 安装, 以及网络连接。")
 
 if __name__ == "__main__":
     main()
