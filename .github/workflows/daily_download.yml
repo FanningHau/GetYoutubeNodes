@@ -13,46 +13,47 @@ jobs:
       contents: write
 
     steps:
+      # (步骤 1-4 保持不变: Checkout, Set up Python, Install FFmpeg, Install Python deps)
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
       - name: Install FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install google-api-python-client gdown yt-dlp
       
-      # (!!) --- 关键改动在这里 ---
+      # (步骤 5 保持不变: 注入所有 secrets)
       - name: Run Python script
-        run: python getnodes_modified.py # 运行我们修改后的脚本
+        run: python getnodes_modified.py 
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          VIDEO_ID: ${{ secrets.VIDEO_ID }}        # <-- 新增
-          ZIP_PASSWORD: ${{ secrets.ZIP_PASSWORD }}    # <-- 新增
+          VIDEO_ID: ${{ secrets.VIDEO_ID }}        
+          ZIP_PASSWORD: ${{ secrets.ZIP_PASSWORD }}    
 
-      # (!!) --- 提交步骤 (保持不变) ---
+      # (!!) --- 步骤 6: (核心修改) 提交所有变动的文件 ---
       - name: Commit and push extracted content
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add ${{ env.FINAL_CONTENT_FILE_NAME }}
+          
+          # (!!) 修改点: 不再添加特定文件，而是添加所有新文件/变动文件
+          git add .
           
           if [ -z "$(git status --porcelain)" ]; then
             echo "✅ 文本内容没有变化，无需提交。"
           else
             echo "🚀 发现文本内容更新，正在提交..."
+            # (!!) 提交信息保持通用
             git commit -m "Automated update: 提取并更新订阅内容 (${{ env.TODAY_DATE }})"
             git push
           fi
         env:
-          FINAL_CONTENT_FILE_NAME: "subscription_content.txt" 
+          # (!!) 不再需要 FINAL_CONTENT_FILE_NAME
           TODAY_DATE: $(date +'%Y-%m-%d')
