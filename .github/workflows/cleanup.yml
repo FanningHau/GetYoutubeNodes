@@ -1,8 +1,6 @@
 # .github/workflows/cleanup.yml
-#
-# 这个工作流专门用于定期清理
 
-name:  weekly temp_downloads Cleanup
+name:  每周定时清理
 
 on:
   schedule:
@@ -15,6 +13,11 @@ on:
 jobs:
   cleanup_job:
     runs-on: ubuntu-latest
+    
+    # (!!) --- 核心修复：在这里添加写入权限 ---
+    permissions:
+      contents: write
+    # (!!) -------------------------------------
     
     steps:
       # 1. 检出 (Checkout) 仓库
@@ -36,7 +39,6 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
           # (!!) 必须使用 [skip ci]
-          # 这样这个提交就不会再次触发您的“每日更新”工作流
           commit_message: "MAINT: Weekly cleanup of temp_downloads [skip ci]"
           
           commit_user_name: "fanning"
