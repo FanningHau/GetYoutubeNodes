@@ -1,0 +1,43 @@
+# .github/workflows/cleanup.yml
+#
+# 这个工作流专门用于定期清理
+
+name:  weekly temp_downloads Cleanup
+
+on:
+  schedule:
+    # (!!) 设为每周日凌晨 5:00 (UTC) 执行一次
+    - cron: '0 5 * * 0'
+  
+  # (!!) 添加这个，方便您随时手动触发一次“大扫除”
+  workflow_dispatch:
+
+jobs:
+  cleanup_job:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. 检出 (Checkout) 仓库
+      - uses: actions/checkout@v4
+
+      # 2. (!!) 核心步骤：删除 temp_downloads 文件夹内的所有文件
+      - name: Clear temp_downloads directory
+        run: |
+          echo "Clearing old files from temp_downloads..."
+          # 删除文件夹里的所有内容
+          rm -rf temp_downloads/*
+          
+          # (!!) 添加一个 .gitkeep 文件
+          # 这样 git-auto-commit-action 才能检测到变动
+          touch temp_downloads/.gitkeep
+
+      # 3. (!!) 提交这个“删除”操作
+      - name: Commit the cleanup
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          # (!!) 必须使用 [skip ci]
+          # 这样这个提交就不会再次触发您的“每日更新”工作流
+          commit_message: "MAINT: Weekly cleanup of temp_downloads [skip ci]"
+          
+          commit_user_name: "fanning"
+          commit_user_email: "haofanning@gmail.com"
