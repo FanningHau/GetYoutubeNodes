@@ -2,7 +2,7 @@ name: 每日提取并更新内容
 
 on:
   schedule:
-    # 每天 8:00 (UTC 时间) 运行
+    # 每天 10:00 (UTC 时间) 运行
     - cron: '0 10 * * *'
   
   workflow_dispatch:
