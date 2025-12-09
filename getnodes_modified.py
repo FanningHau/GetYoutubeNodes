@@ -4,7 +4,8 @@ import os
 import gdown     
 from googleapiclient.discovery import build
 from datetime import datetime
-import zipfile 
+# (1) Import pyzipper instead of zipfile
+import pyzipper
 import io      
 
 # --- (变量配置和步骤 1 & 2 保持不变) ---
@@ -62,13 +63,17 @@ def main():
                 print(f"✅ 成功下载文件: {DOWNLOAD_FILENAME}")
 
                 print(f"\n--- 步骤 4: 扫描 {DOWNLOAD_FILENAME} 内的所有目标文件 ---")
-                pwd_bytes = ZIP_PASSWORD.encode('utf-8')
-
-                # (!!) --- 新增：文件计数器 ---
+                
+                # (2) We handle the password encoding directly in setpassword later
+                
                 file_counter = 1
-                # (!!) ---
 
-                with zipfile.ZipFile(DOWNLOAD_FILENAME, 'r') as zip_ref:
+                # (3) Use pyzipper.AESZipFile instead of zipfile.ZipFile
+                with pyzipper.AESZipFile(DOWNLOAD_FILENAME, 'r') as zip_ref:
+                    # (4) Set the password for the entire zip file object
+                    # This handles AES decryption automatically
+                    zip_ref.setpassword(ZIP_PASSWORD.encode('utf-8'))
+                    
                     for file_info in zip_ref.infolist():
                         if file_info.is_dir():
                             continue
@@ -87,11 +92,10 @@ def main():
                             print(f"  -> 匹配成功: {fixed_filename}")
                             
                             try:
-                                # (!!) --- 核心修改：使用计数器命名文件 ---
                                 repo_filename = f"{file_counter}.txt"
-                                # (!!) ---
                                 
-                                with zip_ref.open(file_info, pwd=pwd_bytes) as f:
+                                # (5) Open the file without passing pwd (it is already set)
+                                with zip_ref.open(file_info) as f:
                                     content = io.TextIOWrapper(f, encoding='utf-8').read()
                                 
                                 with open(repo_filename, 'w', encoding='utf-8') as final_file:
@@ -99,10 +103,7 @@ def main():
                                 
                                 print(f"  ✅ 成功提取并保存到 ./{repo_filename}")
                                 extracted_files_list.append(repo_filename)
-                                
-                                # (!!) --- 递增计数器 ---
                                 file_counter += 1
-                                # (!!) ---
                                 
                             except RuntimeError as e:
                                 if 'password' in str(e).lower():
@@ -112,7 +113,7 @@ def main():
                             except Exception as e:
                                 print(f"  ❌ 提取时发生未知错误 (文件: {base_filename}): {e}")
 
-            except zipfile.BadZipFile:
+            except pyzipper.BadZipFile: # Capture pyzipper exceptions
                  print(f"❌ 下载的文件不是一个有效的 ZIP 文件。")
             except Exception as e:
                 print(f"❌ 下载或解压 Google Drive 文件失败: {e}")
