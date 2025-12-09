@@ -4,11 +4,10 @@ import os
 import gdown     
 from googleapiclient.discovery import build
 from datetime import datetime
-# (1) Import pyzipper instead of zipfile
 import pyzipper
 import io      
 
-# --- (变量配置和步骤 1 & 2 保持不变) ---
+# --- (变量配置保持不变) ---
 API_KEY = os.environ.get("YOUTUBE_API_KEY")
 VIDEO_ID = os.environ.get("VIDEO_ID")
 ZIP_PASSWORD = os.environ.get("ZIP_PASSWORD")
@@ -25,11 +24,31 @@ def main():
         print("❌ 严重错误：YOUTUBE_API_KEY, VIDEO_ID, 或 ZIP_PASSWORD 未设置。")
         sys.exit(1)
 
-    print(f"--- 正在处理 Video ID: {VIDEO_ID} ---")
+    # (!!) --- [新增] 步骤 0: 清理旧的订阅文件 ---
+    # 这一步是为了防止旧的 2.txt, 3.txt 残留
+    print("--- 步骤 0: 清理旧的订阅文件 (1.txt, 2.txt...) ---")
+    current_dir = os.getcwd() # 获取当前根目录
+    deleted_count = 0
+    
+    for filename in os.listdir(current_dir):
+        # 使用正则匹配：开头是数字 + 结尾是 .txt (例如 1.txt, 12.txt)
+        if re.match(r'^\d+\.txt$', filename):
+            try:
+                os.remove(os.path.join(current_dir, filename))
+                print(f"  🗑️ 已删除旧文件: {filename}")
+                deleted_count += 1
+            except Exception as e:
+                print(f"  ⚠️ 删除失败 {filename}: {e}")
+    
+    if deleted_count == 0:
+        print("  没有发现旧的数字命名文件，无需清理。")
+    # (!!) ---------------------------------------
+
+    print(f"\n--- 正在处理 Video ID: {VIDEO_ID} ---")
     video_url = f"https://www.youtube.com/watch?v={VIDEO_ID}"
     
     try:
-        # --- (步骤 1 & 2 保持不变: 获取链接) ---
+        # --- (步骤 1 & 2 保持不变) ---
         print("--- 步骤 1 & 2: 获取 YouTube 链接 ---")
         youtube = build('youtube', 'v3', developerKey=API_KEY)
         video_response = youtube.videos().list(part='snippet', id=VIDEO_ID).execute()
@@ -54,7 +73,7 @@ def main():
             f.write(f"\n[YouTube Video Link]\n{video_url}\n")
         print(f"✅ 成功保存链接到 {OUTPUT_LINK_FILE}")
 
-        # --- (!! 核心修改在步骤 4 !!) ---
+        # --- (步骤 3 & 4) ---
         extracted_files_list = [] 
         if found_gdrive_link:
             print(f"\n--- 步骤 3: 下载 Google Drive 文件 ---")
@@ -64,21 +83,15 @@ def main():
 
                 print(f"\n--- 步骤 4: 扫描 {DOWNLOAD_FILENAME} 内的所有目标文件 ---")
                 
-                # (2) We handle the password encoding directly in setpassword later
-                
                 file_counter = 1
 
-                # (3) Use pyzipper.AESZipFile instead of zipfile.ZipFile
                 with pyzipper.AESZipFile(DOWNLOAD_FILENAME, 'r') as zip_ref:
-                    # (4) Set the password for the entire zip file object
-                    # This handles AES decryption automatically
                     zip_ref.setpassword(ZIP_PASSWORD.encode('utf-8'))
                     
                     for file_info in zip_ref.infolist():
                         if file_info.is_dir():
                             continue
                         
-                        # (!!) 解码逻辑 (保持不变)
                         try:
                             fixed_filename = file_info.filename.encode('cp437').decode('gbk')
                         except:
@@ -86,7 +99,6 @@ def main():
                         
                         base_filename = os.path.basename(fixed_filename)
                         
-                        # (!!) 匹配逻辑 (保持不变)
                         target_suffix = '复制导入.txt'
                         if base_filename.strip().lower().endswith(target_suffix.lower()):
                             print(f"  -> 匹配成功: {fixed_filename}")
@@ -94,7 +106,6 @@ def main():
                             try:
                                 repo_filename = f"{file_counter}.txt"
                                 
-                                # (5) Open the file without passing pwd (it is already set)
                                 with zip_ref.open(file_info) as f:
                                     content = io.TextIOWrapper(f, encoding='utf-8').read()
                                 
@@ -113,7 +124,7 @@ def main():
                             except Exception as e:
                                 print(f"  ❌ 提取时发生未知错误 (文件: {base_filename}): {e}")
 
-            except pyzipper.BadZipFile: # Capture pyzipper exceptions
+            except pyzipper.BadZipFile: 
                  print(f"❌ 下载的文件不是一个有效的 ZIP 文件。")
             except Exception as e:
                 print(f"❌ 下载或解压 Google Drive 文件失败: {e}")
@@ -123,12 +134,10 @@ def main():
         # --- 总结 ---
         if not extracted_files_list:
             print(f"\n--- 任务完成 ---")
-            print(f"⚠️ 未能在 {DOWNLOAD_FILENAME} 中找到任何匹配 '...复制导入.txt' 的文件。")
+            print(f"⚠️ 未能在 ZIP 中找到任何匹配文件。")
         else:
             print(f"\n--- 任务完成 ---")
-            print(f"成功提取并保存了 {len(extracted_files_list)} 个文件:")
-            for f in extracted_files_list:
-                print(f"  - {f}")
+            print(f"成功提取并保存了 {len(extracted_files_list)} 个文件。")
 
     except Exception as e:
         print(f"\n发生严重错误：{e}")
